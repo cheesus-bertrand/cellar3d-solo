@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Wine Cellar</title>
+    <style>
+        :root {
+            --lumon-blue: #005a84;
+            --lumon-bg: #e2e8f0;
+            --lumon-text: #1a202c;
+            --lumon-border: #cbd5e0;
+            --font-main: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        }
+
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            background-color: #000; 
+            font-family: var(--font-main);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        canvas { display: block; }
+
+        .instructions {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: var(--lumon-text);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border: 1px solid var(--lumon-border);
+            font-size: 11px;
+            z-index: 10;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            line-height: 1.6;
+            pointer-events: none;
+        }
+
+        .instructions b {
+            color: var(--lumon-blue);
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+
+        .bottle-info {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: var(--lumon-text);
+            background: #ffffff;
+            padding: 25px;
+            border: 1px solid var(--lumon-border);
+            z-index: 10;
+            display: none;
+            text-align: left;
+            min-width: 280px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+        }
+
+        #bottleInfo strong {
+            display: block;
+            font-size: 10px;
+            color: var(--lumon-blue);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 8px;
+            font-weight: 800;
+        }
+
+        .data-value {
+            font-size: 18px;
+            font-weight: 300;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+            color: #000;
+        }
+
+        @keyframes lumonFade {
+            from { opacity: 0; filter: blur(4px); }
+            to { opacity: 1; filter: blur(0); }
+        }
+
+        .bottle-info.active {
+            display: block;
+            animation: lumonFade 0.2s ease-out forwards;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+        "three": "./node_modules/three/build/three.module.js",
+        "three/addons/": "./node_modules/three/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div class="instructions">
+        <b>Input Commands</b>
+        Rotate: Mouse Left + Drag<br>
+        Translate: Mouse Right + Drag<br>
+        Scale: Scroll Wheel<br>
+        <br>
+        <b>Status</b><br>
+        Awaiting Data Point Selection...
+    </div>
+
+    <div class="bottle-info" id="bottleInfo"></div>
+
+    <script type="module" src="./script2.js"></script>
+
+    <script>
+        const info = document.getElementById('bottleInfo');
+        const observer = new MutationObserver((mutations) => {
+            if (info.style.display === 'block') {
+                info.classList.add('active');
+                
+                const lines = info.innerHTML.split('<br>');
+                if (lines.length >= 3) {
+                    info.innerHTML = `
+                        <strong>Refinement Coordinates</strong>
+                        <div class="data-value">${lines[0].replace('<strong>Bottle:</strong>', '')}</div>
+                        <strong>Designation</strong>
+                        <div class="data-value">${lines[1].replace('<strong>Wine:</strong>', '')}</div>
+                        <strong>Batch Year</strong>
+                        <div class="data-value">${lines[2].replace('<strong>Vintage:</strong>', '')}</div>
+                    `;
+                }
+            } else {
+                info.classList.remove('active');
+            }
+        });
+        observer.observe(info, { attributes: true, attributeFilter: ['style'] });
+    </script>
+</body>
+</html>

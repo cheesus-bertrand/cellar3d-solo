@@ -1,0 +1,21 @@
+{
+  "name": "wine-cellar-simulator",
+  "version": "1.0.0",
+  "description": "A 3D interactive wine cellar simulator built with Three.js featuring dynamic lighting and spatial configuration.",
+  "type": "module",
+  "main": "script2.js",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "keywords": [
+    "threejs",
+    "webgl",
+    "interactive",
+    "3d-modeling"
+  ],
+  "author": "cheesus-bertrand",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.178.0"
+  }
+}
