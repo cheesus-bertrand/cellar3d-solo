@@ -1,5 +1,5 @@
 {
-  "name": "wine-cellar-simulator",
+  "name": "3d-wine-cellar",
   "version": "1.0.0",
   "description": "A 3D interactive wine cellar simulator built with Three.js featuring dynamic lighting and spatial configuration.",
   "type": "module",

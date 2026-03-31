@@ -2,36 +2,232 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 
-// config
-const urlParams = new URLSearchParams(window.location.search);
-const CONFIG = {
-    width: parseInt(urlParams.get('width')) || 10,
-    height: parseInt(urlParams.get('height')) || 5,
-    depth: parseInt(urlParams.get('depth')) || 3,
-    lightIntensity: parseFloat(urlParams.get('lightIntensity')) || 250,
-    orientation: 'forward', 
-    bottle: { radius: 0.35, height: 2.5, hSpacing: 0.7, vSpacing: 0.5, zSpacing: 0.2 },
-    shelf: { thickness: 0.1 },
-    colors: { bottle: 0x334433, shelf: 0x8B4513, room: 0x181818, highlight: 0xa12c44 }
-};
-
-let scene, camera, renderer, controls, raycaster;
+// global consts/state
+let scene, camera, renderer, controls, raycaster, gui;
 const mouse = new THREE.Vector2();
-const textureLoader = new THREE.TextureLoader();
-let bottles = [];
-let shelves = [];
-let roomPlanes = [];
-let activeLights = []; // track lights/targets for cleanup
+const cellars = [];
+let allBottles = [];
 let INTERSECTED_BOTTLE = null;
 
-init();
-animate();
+// persistent groups
+const worldGroup = new THREE.Group();
+const wireMat = new THREE.MeshStandardMaterial({ metalness: 1.0, roughness: 0.1 });
+
+// bottle geometry
+const createBottleGeometry = (radius, height) => {
+    const pts = [];
+    const rad = radius;
+    const h = height;
+    pts.push(new THREE.Vector2(0, 0));
+    pts.push(new THREE.Vector2(rad, 0));
+    pts.push(new THREE.Vector2(rad, h * 0.55));
+    pts.push(new THREE.Vector2(rad * 0.9, h * 0.65));
+    pts.push(new THREE.Vector2(rad * 0.3, h * 0.75));
+    pts.push(new THREE.Vector2(rad * 0.3, h * 0.95));
+    pts.push(new THREE.Vector2(rad * 0.35, h * 0.96));
+    pts.push(new THREE.Vector2(rad * 0.35, h));
+    pts.push(new THREE.Vector2(0, h));
+    return new THREE.LatheGeometry(pts, 32);
+};
+
+// persistence helper
+function saveToLocalStorage() {
+    const data = cellars.map(c => c.config);
+    localStorage.setItem('wineCellarConfig', JSON.stringify(data));
+}
+
+class Cellar {
+    constructor(id, name, savedConfig = null) {
+        this.id = id;
+        this.name = name;
+        this.group = new THREE.Group();
+        this.localLightGroup = new THREE.Group();
+        
+        cellars.push(this);
+
+        // load config or use defaults
+        this.config = savedConfig || {
+            width: 10,
+            height: 5,
+            depth: 3,
+            orientation: 'forward',
+            lightIntensity: 250,
+            posX: ((cellars.length - 1) * 12) - 6,
+            posY: 0,
+            posZ: 0,
+            rotY: 0,
+            bottle: { radius: 0.35, height: 2.5, hSpacing: 0.7, vSpacing: 0.5, zSpacing: 0.2 },
+            shelf: { thickness: 0.03, wireDensity: 12 },
+            colors: { bottle: 0x334433, shelf: 0xcccccc, highlight: 0xa12c44 }
+        };
+
+        this.folder = gui.addFolder(`Cellar: ${this.name}`);
+        this.setupGUI();
+        this.refresh();
+        
+        this.group.add(this.localLightGroup);
+        worldGroup.add(this.group);
+    }
+
+    setupGUI() {
+        const onChange = () => { this.refresh(); saveToLocalStorage(); };
+        const onTransform = () => { this.updateTransform(); saveToLocalStorage(); };
+
+        const structFolder = this.folder.addFolder('Structure');
+        structFolder.add(this.config, 'orientation', ['upright', 'side', 'forward']).name('Orientation').onChange(onChange);
+        structFolder.add(this.config, 'width', 1, 30, 1).name('Width').onChange(onChange);
+        structFolder.add(this.config, 'height', 1, 20, 1).name('Height').onChange(onChange);
+        structFolder.add(this.config, 'depth', 1, 10, 1).name('Depth').onChange(onChange);
+
+        const spacingFolder = this.folder.addFolder('Spacing & Sizing');
+        spacingFolder.add(this.config.bottle, 'hSpacing', 0, 2).name('Horizontal').onChange(onChange);
+        spacingFolder.add(this.config.bottle, 'vSpacing', 0, 2).name('Vertical').onChange(onChange);
+        spacingFolder.add(this.config.bottle, 'zSpacing', 0, 2).name('Depth Buffer').onChange(onChange);
+        spacingFolder.add(this.config.bottle, 'radius', 0.1, 1).name('Bottle Radius').onChange(onChange);
+
+        const styleFolder = this.folder.addFolder('Styles & Lights');
+        styleFolder.addColor(this.config.colors, 'shelf').name('Shelf Color').onChange(onChange);
+        styleFolder.addColor(this.config.colors, 'bottle').name('Bottle Color').onChange(onChange);
+        styleFolder.add(this.config, 'lightIntensity', 0, 1000).name('Light Intensity').onChange(onChange);
+
+        const moveFolder = this.folder.addFolder('Placement');
+        moveFolder.add(this.config, 'posX', -100, 100).name('X').onChange(onTransform);
+        moveFolder.add(this.config, 'posY', -20, 20).name('Y').onChange(onTransform);
+        moveFolder.add(this.config, 'posZ', -100, 100).name('Z').onChange(onTransform);
+        moveFolder.add(this.config, 'rotY', 0, Math.PI * 2).name('Rotate Y').onChange(onTransform);
+    }
+
+    updateTransform() {
+        this.group.position.set(this.config.posX, this.config.posY, this.config.posZ);
+        this.group.rotation.y = this.config.rotY;
+    }
+
+    refresh() {
+        const toRemove = [];
+        this.group.children.forEach(child => {
+            if (child !== this.localLightGroup) toRemove.push(child);
+        });
+        toRemove.forEach(child => this.group.remove(child));
+        this.localLightGroup.clear();
+
+        this.updateTransform();
+
+        const bDiam = this.config.bottle.radius * 2;
+        const slotW = (this.config.orientation === 'side') ? this.config.bottle.height : bDiam;
+        const slotH = (this.config.orientation === 'upright') ? this.config.bottle.height : bDiam;
+        const slotD = (this.config.orientation === 'forward') ? this.config.bottle.height : bDiam;
+
+        const shelfDepth = (this.config.depth * slotD) + (this.config.depth * this.config.bottle.zSpacing) + 0.5;
+        const totalWidth = (slotW * this.config.width) + (this.config.bottle.hSpacing * (this.config.width - 1)) + 1;
+        const totalHeight = (slotH + this.config.bottle.vSpacing + this.config.shelf.thickness) * this.config.height;
+
+        const dim = { totalWidth, totalHeight, shelfDepth, slotW, slotH, slotD };
+
+        this.createStructure(dim);
+        this.createLighting(dim);
+        updateRaycastList();
+    }
+
+    createLighting({ totalWidth, totalHeight, shelfDepth }) {
+        const numLights = Math.max(1, Math.ceil(totalWidth / 8)); 
+        for (let i = 0; i < numLights; i++) {
+            let lightX = (numLights === 1) ? 0 : (i - (numLights - 1) / 2) * (totalWidth / numLights);
+            const spotLight = new THREE.SpotLight(0xffffff, this.config.lightIntensity * 1.5, 60, Math.PI / 4, 0.5, 1);
+            spotLight.position.set(lightX, totalHeight + 8, shelfDepth + 5);
+            const target = new THREE.Object3D();
+            target.position.set(lightX, totalHeight / 2, 0);
+            spotLight.target = target;
+            spotLight.castShadow = true;
+            spotLight.shadow.mapSize.set(1024, 1024);
+            this.localLightGroup.add(spotLight, target);
+        }
+    }
+
+    createStructure({ totalWidth, shelfDepth, slotW, slotH, slotD }) {
+        const bottleGeoLocal = createBottleGeometry(this.config.bottle.radius, this.config.bottle.height);
+        
+        const cellarBottleMat = new THREE.MeshStandardMaterial({ 
+            color: this.config.colors.bottle, 
+            roughness: 0.1, 
+            metalness: 0.5 
+        });
+
+        const localWireMat = wireMat.clone();
+        localWireMat.color.setHex(this.config.colors.shelf);
+
+        for (let h = 0; h < this.config.height; h++) {
+            const y = h * (slotH + this.config.bottle.vSpacing + this.config.shelf.thickness);
+            
+            const longWireGeo = new THREE.CylinderGeometry(this.config.shelf.thickness/1.5, this.config.shelf.thickness/1.5, shelfDepth, 8);
+            for (let i = 0; i <= this.config.width; i++) {
+                const wire = new THREE.Mesh(longWireGeo, localWireMat);
+                wire.rotation.x = Math.PI / 2;
+                wire.position.set(-(totalWidth/2) + (i * (totalWidth / this.config.width)), y, 0);
+                wire.castShadow = true;
+                this.group.add(wire);
+            }
+
+            const transWireGeo = new THREE.CylinderGeometry(this.config.shelf.thickness/2, this.config.shelf.thickness/2, totalWidth, 8);
+            const crossWireCount = Math.floor(shelfDepth * this.config.shelf.wireDensity);
+            for (let j = 0; j <= crossWireCount; j++) {
+                const wire = new THREE.Mesh(transWireGeo, localWireMat);
+                wire.rotation.z = Math.PI / 2;
+                wire.position.set(0, y + this.config.shelf.thickness/2, -(shelfDepth/2) + (j * (shelfDepth/crossWireCount)));
+                wire.castShadow = true;
+                this.group.add(wire);
+            }
+
+            for (let w = 0; w < this.config.width; w++) {
+                for (let d = 0; d < this.config.depth; d++) {
+                    const bottle = new THREE.Mesh(bottleGeoLocal, cellarBottleMat);
+                    const xform = this.getBottleXform(w, h, d, y, totalWidth, shelfDepth, slotW, slotD);
+                    
+                    bottle.position.set(...xform.pos);
+                    bottle.rotation.set(...xform.rot);
+                    bottle.castShadow = bottle.receiveShadow = true;
+                    
+                    const invertedDepth = this.config.depth - d;
+                    bottle.userData = { 
+                        originalMaterial: cellarBottleMat,
+                        highlightColor: this.config.colors.highlight,
+                        cellarId: this.name,
+                        row: h + 1, col: w + 1, depth: invertedDepth,
+                        wineName: `Wine ${this.name}-R${h+1}C${w+1}D${invertedDepth}`,
+                        vintage: `20${10 + h + w + d}`
+                    };
+
+                    this.group.add(bottle);
+                }
+            }
+        }
+    }
+
+    getBottleXform(w, h, d, yBase, totalWidth, shelfDepth, slotW, slotD) {
+        const zStart = -shelfDepth / 2 + 0.4;
+        const xBase = -(totalWidth / 2) + 0.5;
+        const out = { pos: [0, 0, 0], rot: [0, 0, 0] };
+
+        if (this.config.orientation === 'forward') {
+            out.pos = [xBase + this.config.bottle.radius + w * (slotW + this.config.bottle.hSpacing), yBase + this.config.shelf.thickness + this.config.bottle.radius, zStart + (d * (this.config.bottle.height + this.config.bottle.zSpacing))];
+            out.rot = [Math.PI / 2, 0, 0];
+        } else if (this.config.orientation === 'side') {
+            out.pos = [xBase + w * (slotW + this.config.bottle.hSpacing), yBase + this.config.shelf.thickness + this.config.bottle.radius, zStart + (d * (slotD + this.config.bottle.zSpacing)) + this.config.bottle.radius];
+            out.rot = [0, 0, -Math.PI / 2];
+        } else {
+            out.pos = [xBase + this.config.bottle.radius + w * (slotW + this.config.bottle.hSpacing), yBase + this.config.shelf.thickness, zStart + (d * (slotD + this.config.bottle.zSpacing)) + this.config.bottle.radius];
+            out.rot = [0, 0, 0];
+        }
+        return out;
+    }
+}
 
 function init() {
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(CONFIG.colors.room);
+    scene.background = new THREE.Color(0x181818);
 
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+    camera.position.set(0, 15, 35);
+
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
@@ -41,195 +237,64 @@ function init() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    refreshScene();
+    scene.add(worldGroup);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
-    const gui = new GUI();
-    const configFolder = gui.addFolder('Cellar Configuration');
-    configFolder.add(CONFIG, 'orientation', ['upright', 'side', 'forward']).name('Orientation').onChange(refreshScene);
-    configFolder.add(CONFIG, 'width', 1, 30, 1).name('Width').onChange(refreshScene);
-    configFolder.add(CONFIG, 'height', 1, 20, 1).name('Height').onChange(refreshScene);
-    configFolder.add(CONFIG, 'depth', 1, 10, 1).name('Depth').onChange(refreshScene);
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.2}));
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.05;
+    floor.receiveShadow = true;
+    scene.add(floor);
 
-    const spacingFolder = gui.addFolder('Spacing');
-    spacingFolder.add(CONFIG.bottle, 'hSpacing', 0, 2).name('Horizontal').onChange(refreshScene);
-    spacingFolder.add(CONFIG.bottle, 'vSpacing', 0, 2).name('Vertical').onChange(refreshScene);
-    spacingFolder.add(CONFIG.bottle, 'zSpacing', 0, 2).name('Depth Buffer').onChange(refreshScene);
-
-    const actionFolder = gui.addFolder('Bottle Actions');
-    const bottleActions = {
-        logInfo: () => {
-            if (INTERSECTED_BOTTLE) {
-                console.log("Bottle Data:", INTERSECTED_BOTTLE.userData);
-                alert(`Bottle: ${INTERSECTED_BOTTLE.userData.wineName}\nVintage: ${INTERSECTED_BOTTLE.userData.vintage}\nPosition: R${INTERSECTED_BOTTLE.userData.row} C${INTERSECTED_BOTTLE.userData.col} D${INTERSECTED_BOTTLE.userData.depth}`);
-            } else {
-                alert("No bottle selected!");
+    gui = new GUI();
+    const globalActions = {
+        addCellar: (passedConfig = null) => {
+            let finalConfig = null;
+            
+            // if no specific config passed (storage), copy last cellar
+            if (!passedConfig && cellars.length > 0) {
+                const lastCellar = cellars[cellars.length - 1];
+                // copy the existing config
+                finalConfig = JSON.parse(JSON.stringify(lastCellar.config));
+                // reposition
+                finalConfig.posX += 12; 
+            } else if (passedConfig) {
+                finalConfig = passedConfig;
             }
+
+            const name = `Cellar_${cellars.length + 1}`;
+            new Cellar(cellars.length, name, finalConfig);
+            saveToLocalStorage();
+        },
+        resetAll: () => {
+            localStorage.removeItem('wineCellarConfig');
+            location.reload();
         }
     };
-    actionFolder.add(bottleActions, 'logInfo').name('Show Details');
+    gui.add(globalActions, 'addCellar').name('＋ Add New Cellar');
+    gui.add(globalActions, 'resetAll').name('⚠ Reset All');
+
+    // localstorage configs
+    const saved = localStorage.getItem('wineCellarConfig');
+    if (saved) {
+        const configs = JSON.parse(saved);
+        configs.forEach(conf => globalActions.addCellar(conf));
+    } else {
+        globalActions.addCellar();
+    }
 
     raycaster = new THREE.Raycaster();
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('resize', onWindowResize);
 }
 
-function refreshScene() {
-    // cleanup everything inc lighting
-    bottles.forEach(b => scene.remove(b));
-    shelves.forEach(s => scene.remove(s));
-    roomPlanes.forEach(p => scene.remove(p));
-    
-    activeLights.forEach(l => {
-        if(l.target) scene.remove(l.target);
-        scene.remove(l);
+function updateRaycastList() {
+    allBottles = [];
+    cellars.forEach(c => {
+        c.group.children.forEach(child => {
+            if (child.userData && child.userData.wineName) allBottles.push(child);
+        });
     });
-    
-    bottles = [];
-    shelves = [];
-    roomPlanes = [];
-    activeLights = [];
-
-    // dimensions logic
-    const bDiam = CONFIG.bottle.radius * 2;
-    const slotW = (CONFIG.orientation === 'side') ? CONFIG.bottle.height : bDiam;
-    const slotH = (CONFIG.orientation === 'upright') ? CONFIG.bottle.height : bDiam;
-    const slotD = (CONFIG.orientation === 'forward') ? CONFIG.bottle.height : bDiam;
-
-    const shelfDepth = (CONFIG.depth * slotD) + (CONFIG.depth * CONFIG.bottle.zSpacing) + 0.5;
-    const totalWidth = (slotW * CONFIG.width) + (CONFIG.bottle.hSpacing * (CONFIG.width - 1)) + 1;
-    const totalHeight = (slotH + CONFIG.bottle.vSpacing + CONFIG.shelf.thickness) * CONFIG.height;
-
-    const dim = { totalWidth, totalHeight, shelfDepth, slotW, slotH, slotD };
-
-    createRoom(dim);
-    createCellarStructure(dim);
-    createLighting(dim);
-
-    camera.position.set(0, totalHeight / 2 + 2, shelfDepth + 8);
-    controls.target.set(0, totalHeight / 2, 0);
-    controls.update();
-}
-
-function createLighting({ totalWidth, totalHeight, shelfDepth }) {
-    // ambient light
-    const ambient = new THREE.AmbientLight(0xffffff, 0.1);
-    scene.add(ambient);
-    activeLights.push(ambient);
-
-    // distributed spotlights
-    const numLights = Math.max(1, Math.ceil(totalWidth / 8)); 
-    
-    for (let i = 0; i < numLights; i++) {
-        // calc position so they are centered
-        let lightX = (numLights === 1) ? 0 : (i - (numLights - 1) / 2) * (totalWidth / numLights);
-
-        const spotLight = new THREE.SpotLight(0xffddaa, CONFIG.lightIntensity, 50, Math.PI / 4, 0.5, 1.5);
-        spotLight.position.set(lightX, totalHeight + 6, shelfDepth + 4);
-        
-        const target = new THREE.Object3D();
-        target.position.set(lightX, totalHeight / 2, 0);
-        scene.add(target);
-        spotLight.target = target;
-
-        spotLight.castShadow = true;
-        spotLight.shadow.mapSize.set(1024, 1024);
-        spotLight.shadow.bias = -0.001;
-
-        scene.add(spotLight);
-        activeLights.push(spotLight);
-    }
-
-    // directional fill
-    const fill = new THREE.DirectionalLight(0xffffff, 0.15);
-    fill.position.set(5, 10, 10);
-    scene.add(fill);
-    activeLights.push(fill);
-}
-
-function createRoom({ totalWidth, totalHeight, shelfDepth }) {
-    const roomSize = Math.max(totalWidth, shelfDepth) * 5;
-    const wallHeight = totalHeight + 15;
-
-    const applyTexture = (path, repeatX, repeatY) => {
-        const tex = textureLoader.load(path);
-        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-        tex.repeat.set(repeatX, repeatY);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        return new THREE.MeshStandardMaterial({ map: tex, roughness: 0.8 });
-    };
-
-    const floorMat = applyTexture('./textures/floor2.avif', roomSize / 4, roomSize / 4);
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, roomSize), floorMat);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.01;
-    floor.receiveShadow = true;
-    scene.add(floor);
-    roomPlanes.push(floor);
-
-    const wallMat = applyTexture('./textures/blackbrick.avif', roomSize / 4, wallHeight / 4);
-    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(roomSize, wallHeight), wallMat);
-    backWall.position.set(0, wallHeight / 2, -shelfDepth / 2 - 0.1);
-    backWall.receiveShadow = true;
-    scene.add(backWall);
-    roomPlanes.push(backWall);
-}
-
-function createCellarStructure({ totalWidth, shelfDepth, slotW, slotH, slotD }) {
-    const bottleGeo = new THREE.CylinderGeometry(CONFIG.bottle.radius, CONFIG.bottle.radius, CONFIG.bottle.height, 32);
-    const shelfMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.shelf, roughness: 0.6 });
-
-    for (let h = 0; h < CONFIG.height; h++) {
-        const y = h * (slotH + CONFIG.bottle.vSpacing + CONFIG.shelf.thickness);
-        
-        const shelf = new THREE.Mesh(new THREE.BoxGeometry(totalWidth, CONFIG.shelf.thickness, shelfDepth), shelfMat);
-        shelf.position.set(0, y + CONFIG.shelf.thickness / 2, 0);
-        shelf.receiveShadow = true;
-        shelf.castShadow = true;
-        scene.add(shelf);
-        shelves.push(shelf);
-
-        for (let w = 0; w < CONFIG.width; w++) {
-            for (let d = 0; d < CONFIG.depth; d++) {
-                const bottle = new THREE.Mesh(bottleGeo, new THREE.MeshStandardMaterial({ color: CONFIG.colors.bottle, roughness: 0.3, metalness: 0.2 }));
-                
-                let xPos, yPos, zPos;
-                const zStart = -shelfDepth / 2 + 0.4;
-
-                if (CONFIG.orientation === 'forward') {
-                    xPos = (-(totalWidth / 2) + 0.5 + CONFIG.bottle.radius) + w * (slotW + CONFIG.bottle.hSpacing);
-                    yPos = y + CONFIG.shelf.thickness + CONFIG.bottle.radius;
-                    zPos = zStart + (d * (CONFIG.bottle.height + CONFIG.bottle.zSpacing)) + CONFIG.bottle.height/2;
-                    bottle.rotation.x = Math.PI / 2;
-                } else if (CONFIG.orientation === 'side') {
-                    xPos = (-(totalWidth / 2) + 0.5 + CONFIG.bottle.height / 2) + w * (slotW + CONFIG.bottle.hSpacing);
-                    yPos = y + CONFIG.shelf.thickness + CONFIG.bottle.radius;
-                    zPos = zStart + (d * (slotD + CONFIG.bottle.zSpacing)) + CONFIG.bottle.radius;
-                    bottle.rotation.z = Math.PI / 2; 
-                } else {
-                    xPos = (-(totalWidth / 2) + 0.5 + CONFIG.bottle.radius) + w * (slotW + CONFIG.bottle.hSpacing);
-                    yPos = y + CONFIG.shelf.thickness + CONFIG.bottle.height / 2;
-                    zPos = zStart + (d * (slotD + CONFIG.bottle.zSpacing)) + CONFIG.bottle.radius;
-                }
-
-                bottle.position.set(xPos, yPos, zPos);
-                bottle.castShadow = true;
-                bottle.receiveShadow = true;
-                
-                const userFacingDepthIndex = CONFIG.depth - 1;
-                const invertedDepthMetadata = userFacingDepthIndex - d + 1;
-
-                bottle.userData = { 
-                    originalColor: CONFIG.colors.bottle,
-                    row: h + 1, col: w + 1, depth: invertedDepthMetadata,
-                    wineName: `Wine R${h+1}C${w+1}D${invertedDepthMetadata}`,
-                    vintage: `20${10 + h + w + d}`
-                };
-
-                scene.add(bottle);
-                bottles.push(bottle);
-            }
-        }
-    }
 }
 
 function onMouseMove(event) {
@@ -242,31 +307,35 @@ function animate() {
     controls.update();
     
     raycaster.setFromCamera(mouse, camera);
-    const intersects = raycaster.intersectObjects(bottles);
+    const intersects = raycaster.intersectObjects(allBottles);
     const infoDiv = document.getElementById('bottleInfo');
 
     if (intersects.length > 0) {
         const target = intersects[0].object;
         if (INTERSECTED_BOTTLE !== target) {
-            if (INTERSECTED_BOTTLE) INTERSECTED_BOTTLE.material.color.setHex(INTERSECTED_BOTTLE.userData.originalColor);
+            if (INTERSECTED_BOTTLE) INTERSECTED_BOTTLE.material = INTERSECTED_BOTTLE.userData.originalMaterial;
+            
             INTERSECTED_BOTTLE = target;
-            INTERSECTED_BOTTLE.material.color.setHex(CONFIG.colors.highlight);
+            
+            const highlightMat = INTERSECTED_BOTTLE.userData.originalMaterial.clone();
+            highlightMat.color.setHex(INTERSECTED_BOTTLE.userData.highlightColor);
+            INTERSECTED_BOTTLE.material = highlightMat;
 
             if (infoDiv) {
                 infoDiv.style.display = 'block';
                 infoDiv.innerHTML = `
-                    <strong>Bottle:</strong> Row ${target.userData.row}, Col ${target.userData.col}, Depth ${target.userData.depth}<br>
+                    <strong>Cellar:</strong> ${target.userData.cellarId}<br>
+                    <strong>Pos:</strong> R${target.userData.row} C${target.userData.col} D${target.userData.depth}<br>
                     <strong>Wine:</strong> ${target.userData.wineName}<br>
                     <strong>Vintage:</strong> ${target.userData.vintage}
                 `;
             }
         }
     } else if (INTERSECTED_BOTTLE) {
-        INTERSECTED_BOTTLE.material.color.setHex(INTERSECTED_BOTTLE.userData.originalColor);
+        INTERSECTED_BOTTLE.material = INTERSECTED_BOTTLE.userData.originalMaterial;
         INTERSECTED_BOTTLE = null;
         if (infoDiv) infoDiv.style.display = 'none';
     }
-
     renderer.render(scene, camera);
 }
 
@@ -275,3 +344,6 @@ function onWindowResize() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 }
+
+init();
+animate();

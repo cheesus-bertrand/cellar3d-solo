@@ -115,28 +115,5 @@
 
     <script type="module" src="./script2.js"></script>
 
-    <script>
-        const info = document.getElementById('bottleInfo');
-        const observer = new MutationObserver((mutations) => {
-            if (info.style.display === 'block') {
-                info.classList.add('active');
-                
-                const lines = info.innerHTML.split('<br>');
-                if (lines.length >= 3) {
-                    info.innerHTML = `
-                        <strong>Refinement Coordinates</strong>
-                        <div class="data-value">${lines[0].replace('<strong>Bottle:</strong>', '')}</div>
-                        <strong>Designation</strong>
-                        <div class="data-value">${lines[1].replace('<strong>Wine:</strong>', '')}</div>
-                        <strong>Batch Year</strong>
-                        <div class="data-value">${lines[2].replace('<strong>Vintage:</strong>', '')}</div>
-                    `;
-                }
-            } else {
-                info.classList.remove('active');
-            }
-        });
-        observer.observe(info, { attributes: true, attributeFilter: ['style'] });
-    </script>
 </body>
 </html>
