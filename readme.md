@@ -1,7 +1,8 @@
+```text
 ================================================================================
   PROJECT: 3D Wine Cellar
   START DATE: June 2025
-  URL: https://cellar3d.vercel.app
+  URL: [https://cellar3d.vercel.app](https://cellar3d.vercel.app)
 ================================================================================
 
 INITIAL REFACTOR:
