@@ -408,10 +408,10 @@ function animate() {
             // update ui
             if (infoDiv) {
                 infoDiv.innerHTML = `
-                    <strong>Cellar:</strong> ${target.userData.cellarId}<br>
-                    <strong>Pos:</strong> R${target.userData.row} C${target.userData.col} D${target.userData.depth}<br>
-                    <strong>Wine:</strong> ${target.userData.wineName}<br>
-                    <strong>Vintage:</strong> ${target.userData.vintage}
+                    <span><strong>ID:</strong> ${target.userData.cellarId}</span>
+                    <span><strong>LOC:</strong> R${target.userData.row}C${target.userData.col}D${target.userData.depth}</span>
+                    <span><strong>NAME:</strong> ${target.userData.wineName}</span>
+                    <span><strong>YEAR:</strong> ${target.userData.vintage}</span>
                 `;
                 infoDiv.classList.add('active');
             }

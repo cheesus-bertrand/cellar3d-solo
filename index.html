@@ -12,7 +12,9 @@
             --lumon-bg: #e2e8f0;
             --lumon-text: #1a202c;
             --lumon-border: #cbd5e0;
+            --plasma-amber: #ffb800;
             --font-main: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            --font-mono: 'Courier New', Courier, monospace;
         }
 
         body { 
@@ -66,70 +68,73 @@
 
         /* UI BOTTLE DATA POPUP */
         .bottle-info {
-            position: absolute;
-            bottom: 40px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: var(--lumon-text);
-            background: #ffffff;
-            padding: 25px;
-            border: 1px solid var(--lumon-border);
-            z-index: 10;
+            position: fixed;
+            bottom: 0; /* Desktop Default */
+            left: 0;
+            width: 100%;
+            background: rgba(20, 20, 20, 0.95);
+            color: var(--plasma-amber);
+            padding: 15px 25px;
+            border-top: 1px solid #333;
+            z-index: 100;
             display: none;
-            text-align: left;
-            min-width: 280px;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+            box-sizing: border-box;
+            font-family: var(--font-mono);
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
         /* Hover Activation State */
         .bottle-info.active {
-            display: block;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             animation: lumonFade 0.2s ease-out forwards;
         }
 
         #bottleInfo strong {
-            display: block;
             font-size: 10px;
-            color: var(--lumon-blue);
-            text-transform: uppercase;
-            letter-spacing: 0.15em;
-            margin-bottom: 4px;
-            margin-top: 8px;
+            color: #888;
+            margin-right: 5px;
             font-weight: 800;
         }
 
-        #bottleInfo strong:first-child {
-            margin-top: 0;
-        }
-
         .data-value {
-            font-size: 18px;
-            font-weight: 300;
-            letter-spacing: -0.02em;
-            margin-bottom: 12px;
-            color: #000;
+            font-size: 14px;
+            font-weight: 400;
+            color: var(--plasma-amber);
+            margin-right: 20px;
         }
 
         @keyframes lumonFade {
-            from { opacity: 0; filter: blur(4px); }
-            to { opacity: 1; filter: blur(0); }
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
         /* MOBILE */
         @media (max-width: 600px) {
-            /* info to top */
             .bottle-info {
+                top: 0; /* move to top on mobile */
                 bottom: auto;
-                top: 20px;
-                width: 85%;
-                padding: 15px;
-                min-width: unset;
+                padding: 10px;
+                font-size: 10px;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 10px;
+                background: #111;
+                border-top: none;
+                border-bottom: 1px solid #333;
             }
 
-            /* instructions above the mobile control panel */
+            .data-value {
+                margin-right: 10px;
+                font-size: 11px;
+            }
+
+            /* instructions centered for mobile */
             .instructions {
-                top: auto;
-                bottom: 42vh; 
+                top: 60px; /* Offset from info bar */
                 left: 10px;
                 right: 10px;
                 padding: 10px;
