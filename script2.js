@@ -329,6 +329,13 @@ function init() {
 
     gui.add(globalActions, 'resetAll').name('⚠ Reset All');
 
+    // GUI interaction listener for mobile resizing
+    gui.domElement.addEventListener('click', (e) => {
+        if (e.target.closest('.title')) {
+            setTimeout(onWindowResize, 310);
+        }
+    });
+
     raycaster = new THREE.Raycaster();
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('resize', onWindowResize);
@@ -346,24 +353,35 @@ function updateRaycastList() {
 
 function onMouseMove(event) {
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    mouse.y = -(event.clientY / (renderer.domElement.height / window.devicePixelRatio)) * 2 + 1;
 }
 
 // handle window
 function onWindowResize() {
-    const aspect = window.innerWidth / window.innerHeight;
-    camera.aspect = aspect;
-    
-    if (aspect < 1) { 
-        camera.position.z = 45; 
-        camera.fov = 80;
-    } else {
-        camera.position.z = 35; 
-        camera.fov = 75;
+    const guiElement = document.querySelector('.lil-gui.root');
+    let availableHeight = window.innerHeight;
+
+    // check if mobile view and GUI  present
+    if (window.innerWidth <= 600 && guiElement) {
+        const guiRect = guiElement.getBoundingClientRect();
+        // if GUI open (height > title bar), subtract visible height
+        if (guiRect.height > 45) { 
+            availableHeight = window.innerHeight - guiRect.height;
+        }
     }
 
+    const aspect = window.innerWidth / availableHeight;
+    camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    renderer.setSize(window.innerWidth, availableHeight, true);
+    
+    // shift camera target slightly up to center the cellar in the remaining white space
+    if (window.innerWidth <= 600) {
+        controls.target.set(0, 6, 0); 
+    } else {
+        controls.target.set(0, 5, 0);
+    }
 }
 
 // render loop

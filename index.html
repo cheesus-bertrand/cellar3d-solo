@@ -19,15 +19,20 @@
             margin: 0; 
             overflow: hidden; 
             display: flex; 
-            justify-content: center; 
+            flex-direction: column;
+            justify-content: flex-start; 
             align-items: center; 
             height: 100vh; 
-            background-color: #000; 
+            background-color: #181818; 
             font-family: var(--font-main);
             -webkit-font-smoothing: antialiased;
         }
 
-        canvas { display: block; }
+        canvas { 
+            display: block; 
+            width: 100% !important;
+            height: auto !important;
+        }
 
         /* UI INSTRUCTIONS OVERLAY */
         .instructions {
