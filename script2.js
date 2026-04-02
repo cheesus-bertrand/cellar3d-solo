@@ -359,30 +359,13 @@ function onMouseMove(event) {
 
 // handle window
 function onWindowResize() {
-    const guiElement = document.querySelector('.lil-gui.root');
-    let availableHeight = window.innerHeight;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
 
-    // check if mobile view and GUI  present
-    if (window.innerWidth <= 600 && guiElement) {
-        const guiRect = guiElement.getBoundingClientRect();
-        // if GUI open (height > title bar), subtract visible height
-        if (guiRect.height > 45) { 
-            availableHeight = window.innerHeight - guiRect.height;
-        }
-    }
-
-    const aspect = window.innerWidth / availableHeight;
-    camera.aspect = aspect;
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
 
-    renderer.setSize(window.innerWidth, availableHeight, true);
-    
-    // shift camera target slightly up to center the cellar in the remaining white space
-    if (window.innerWidth <= 600) {
-        controls.target.set(0, 6, 0); 
-    } else {
-        controls.target.set(0, 5, 0);
-    }
+    renderer.setSize(width, height);
 }
 
 // render loop
