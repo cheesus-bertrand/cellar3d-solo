@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Wine Cellar</title>
+    
     <style>
+        /* DESIGN TOKENS */
         :root {
             --lumon-blue: #005a84;
             --lumon-bg: #e2e8f0;
@@ -27,6 +29,7 @@
 
         canvas { display: block; }
 
+        /* UI INSTRUCTIONS OVERLAY */
         .instructions {
             position: absolute;
             top: 20px;
@@ -41,6 +44,7 @@
             letter-spacing: 0.1em;
             line-height: 1.6;
             pointer-events: none;
+            transition: opacity 1s ease, transform 1s ease;
         }
 
         .instructions b {
@@ -50,6 +54,12 @@
             font-weight: 700;
         }
 
+        .instructions.hidden {
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+
+        /* UI BOTTLE DATA POPUP */
         .bottle-info {
             position: absolute;
             bottom: 40px;
@@ -66,14 +76,25 @@
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
         }
 
+        /* Hover Activation State */
+        .bottle-info.active {
+            display: block;
+            animation: lumonFade 0.2s ease-out forwards;
+        }
+
         #bottleInfo strong {
             display: block;
             font-size: 10px;
             color: var(--lumon-blue);
             text-transform: uppercase;
             letter-spacing: 0.15em;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
+            margin-top: 8px;
             font-weight: 800;
+        }
+
+        #bottleInfo strong:first-child {
+            margin-top: 0;
         }
 
         .data-value {
@@ -89,11 +110,56 @@
             to { opacity: 1; filter: blur(0); }
         }
 
-        .bottle-info.active {
-            display: block;
-            animation: lumonFade 0.2s ease-out forwards;
+        /* MOBILE */
+        @media (max-width: 600px) {
+            /* info to top */
+            .bottle-info {
+                bottom: auto;
+                top: 20px;
+                width: 85%;
+                padding: 15px;
+                min-width: unset;
+            }
+
+            /* instructions above the mobile control panel */
+            .instructions {
+                top: auto;
+                bottom: 42vh; 
+                left: 10px;
+                right: 10px;
+                padding: 10px;
+            }
+
+            /* lil-gui Mobile */
+            .lil-gui.root {
+                position: fixed !important;
+                top: auto !important;
+                bottom: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                max-height: 40vh;
+                overflow-y: auto;
+                border-top: 2px solid var(--lumon-blue);
+            }
+
+            .lil-gui .controller {
+                height: 45px !important;
+                margin: 5px 0 !important;
+            }
+
+            .lil-gui .name {
+                font-size: 14px !important;
+                font-weight: 600;
+            }
+
+            .lil-gui .widget input, 
+            .lil-gui .widget button {
+                height: 35px !important;
+                font-size: 16px !important;
+            }
         }
     </style>
+
     <script type="importmap">
     {
         "imports": {
@@ -104,6 +170,7 @@
     </script>
 </head>
 <body>
+
     <div class="instructions">
         <b>Input Commands</b>
         Rotate: Mouse Left + Drag<br>
@@ -115,5 +182,16 @@
 
     <script type="module" src="./script2.js"></script>
 
+    <script>
+        // hide tooltip
+        window.addEventListener('load', () => {
+            const tooltip = document.querySelector('.instructions');
+            if (tooltip) {
+                setTimeout(() => {
+                    tooltip.classList.add('hidden');
+                }, 5000);
+            }
+        });
+    </script>
 </body>
 </html>

@@ -2,18 +2,17 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 
-// global consts/state
+// global state
 let scene, camera, renderer, controls, raycaster, gui;
 const mouse = new THREE.Vector2();
 const cellars = [];
 let allBottles = [];
 let INTERSECTED_BOTTLE = null;
 
-// persistent groups
 const worldGroup = new THREE.Group();
 const wireMat = new THREE.MeshStandardMaterial({ metalness: 1.0, roughness: 0.1 });
 
-// bottle geometry
+// bottle shape logic
 const createBottleGeometry = (radius, height) => {
     const pts = [];
     const rad = radius;
@@ -30,7 +29,7 @@ const createBottleGeometry = (radius, height) => {
     return new THREE.LatheGeometry(pts, 32);
 };
 
-// persistence helper
+// browser storage
 function saveToLocalStorage() {
     const data = cellars.map(c => c.config);
     localStorage.setItem('wineCellarConfig', JSON.stringify(data));
@@ -45,7 +44,7 @@ class Cellar {
         
         cellars.push(this);
 
-        // load config or use defaults
+        // default settings
         this.config = savedConfig || {
             width: 10,
             height: 5,
@@ -69,40 +68,62 @@ class Cellar {
         worldGroup.add(this.group);
     }
 
+    // menu controls
     setupGUI() {
         const onChange = () => { this.refresh(); saveToLocalStorage(); };
         const onTransform = () => { this.updateTransform(); saveToLocalStorage(); };
+
+        this.folder.open();
 
         const structFolder = this.folder.addFolder('Structure');
         structFolder.add(this.config, 'orientation', ['upright', 'side', 'forward']).name('Orientation').onChange(onChange);
         structFolder.add(this.config, 'width', 1, 30, 1).name('Width').onChange(onChange);
         structFolder.add(this.config, 'height', 1, 20, 1).name('Height').onChange(onChange);
         structFolder.add(this.config, 'depth', 1, 10, 1).name('Depth').onChange(onChange);
+        structFolder.close();
 
         const spacingFolder = this.folder.addFolder('Spacing & Sizing');
         spacingFolder.add(this.config.bottle, 'hSpacing', 0, 2).name('Horizontal').onChange(onChange);
         spacingFolder.add(this.config.bottle, 'vSpacing', 0, 2).name('Vertical').onChange(onChange);
         spacingFolder.add(this.config.bottle, 'zSpacing', 0, 2).name('Depth Buffer').onChange(onChange);
         spacingFolder.add(this.config.bottle, 'radius', 0.1, 1).name('Bottle Radius').onChange(onChange);
+        spacingFolder.close();
 
         const styleFolder = this.folder.addFolder('Styles & Lights');
         styleFolder.addColor(this.config.colors, 'shelf').name('Shelf Color').onChange(onChange);
         styleFolder.addColor(this.config.colors, 'bottle').name('Bottle Color').onChange(onChange);
         styleFolder.add(this.config, 'lightIntensity', 0, 1000).name('Light Intensity').onChange(onChange);
+        styleFolder.close();
 
         const moveFolder = this.folder.addFolder('Placement');
         moveFolder.add(this.config, 'posX', -100, 100).name('X').onChange(onTransform);
         moveFolder.add(this.config, 'posY', -20, 20).name('Y').onChange(onTransform);
         moveFolder.add(this.config, 'posZ', -100, 100).name('Z').onChange(onTransform);
         moveFolder.add(this.config, 'rotY', 0, Math.PI * 2).name('Rotate Y').onChange(onTransform);
+        moveFolder.close();
     }
 
+    // spatial updates
     updateTransform() {
         this.group.position.set(this.config.posX, this.config.posY, this.config.posZ);
         this.group.rotation.y = this.config.rotY;
     }
 
+    // rebuild scene
     refresh() {
+        // clear gpu data
+        this.group.traverse(child => {
+            if (child.isMesh) {
+                child.geometry.dispose();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(m => m.dispose());
+                } else {
+                    child.material.dispose();
+                }
+            }
+        });
+
+        // clean group
         const toRemove = [];
         this.group.children.forEach(child => {
             if (child !== this.localLightGroup) toRemove.push(child);
@@ -112,6 +133,7 @@ class Cellar {
 
         this.updateTransform();
 
+        // sizing math
         const bDiam = this.config.bottle.radius * 2;
         const slotW = (this.config.orientation === 'side') ? this.config.bottle.height : bDiam;
         const slotH = (this.config.orientation === 'upright') ? this.config.bottle.height : bDiam;
@@ -128,21 +150,26 @@ class Cellar {
         updateRaycastList();
     }
 
+    // local spot lights
     createLighting({ totalWidth, totalHeight, shelfDepth }) {
         const numLights = Math.max(1, Math.ceil(totalWidth / 8)); 
         for (let i = 0; i < numLights; i++) {
             let lightX = (numLights === 1) ? 0 : (i - (numLights - 1) / 2) * (totalWidth / numLights);
             const spotLight = new THREE.SpotLight(0xffffff, this.config.lightIntensity * 1.5, 60, Math.PI / 4, 0.5, 1);
             spotLight.position.set(lightX, totalHeight + 8, shelfDepth + 5);
+            
             const target = new THREE.Object3D();
             target.position.set(lightX, totalHeight / 2, 0);
+            
             spotLight.target = target;
             spotLight.castShadow = true;
             spotLight.shadow.mapSize.set(1024, 1024);
+            
             this.localLightGroup.add(spotLight, target);
         }
     }
 
+    // build meshes
     createStructure({ totalWidth, shelfDepth, slotW, slotH, slotD }) {
         const bottleGeoLocal = createBottleGeometry(this.config.bottle.radius, this.config.bottle.height);
         
@@ -155,9 +182,11 @@ class Cellar {
         const localWireMat = wireMat.clone();
         localWireMat.color.setHex(this.config.colors.shelf);
 
+        // loop layers
         for (let h = 0; h < this.config.height; h++) {
             const y = h * (slotH + this.config.bottle.vSpacing + this.config.shelf.thickness);
             
+            // vertical wires
             const longWireGeo = new THREE.CylinderGeometry(this.config.shelf.thickness/1.5, this.config.shelf.thickness/1.5, shelfDepth, 8);
             for (let i = 0; i <= this.config.width; i++) {
                 const wire = new THREE.Mesh(longWireGeo, localWireMat);
@@ -167,6 +196,7 @@ class Cellar {
                 this.group.add(wire);
             }
 
+            // horizontal wires
             const transWireGeo = new THREE.CylinderGeometry(this.config.shelf.thickness/2, this.config.shelf.thickness/2, totalWidth, 8);
             const crossWireCount = Math.floor(shelfDepth * this.config.shelf.wireDensity);
             for (let j = 0; j <= crossWireCount; j++) {
@@ -177,6 +207,7 @@ class Cellar {
                 this.group.add(wire);
             }
 
+            // fill bottles
             for (let w = 0; w < this.config.width; w++) {
                 for (let d = 0; d < this.config.depth; d++) {
                     const bottle = new THREE.Mesh(bottleGeoLocal, cellarBottleMat);
@@ -187,6 +218,7 @@ class Cellar {
                     bottle.castShadow = bottle.receiveShadow = true;
                     
                     const invertedDepth = this.config.depth - d;
+                    // interactive data
                     bottle.userData = { 
                         originalMaterial: cellarBottleMat,
                         highlightColor: this.config.colors.highlight,
@@ -202,6 +234,7 @@ class Cellar {
         }
     }
 
+    // positioning helper
     getBottleXform(w, h, d, yBase, totalWidth, shelfDepth, slotW, slotD) {
         const zStart = -shelfDepth / 2 + 0.4;
         const xBase = -(totalWidth / 2) + 0.5;
@@ -221,12 +254,22 @@ class Cellar {
     }
 }
 
+// setup engine
 function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x181818);
 
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-    camera.position.set(0, 15, 35);
+    
+    // mobile check
+    if (window.innerWidth < window.innerHeight) {
+        camera.position.set(0, 15, 45); 
+        camera.fov = 80;
+    } else {
+        camera.position.set(0, 15, 35);
+        camera.fov = 75;
+    }
+    camera.updateProjectionMatrix();
 
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -236,11 +279,15 @@ function init() {
 
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.target.set(0, 5, 0); 
 
     scene.add(worldGroup);
     scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000), new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.2}));
+    const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(1000, 1000), 
+        new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.2})
+    );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.05;
     floor.receiveShadow = true;
@@ -250,31 +297,28 @@ function init() {
     const globalActions = {
         addCellar: (passedConfig = null) => {
             let finalConfig = null;
-            
-            // if no specific config passed (storage), copy last cellar
             if (!passedConfig && cellars.length > 0) {
                 const lastCellar = cellars[cellars.length - 1];
-                // copy the existing config
                 finalConfig = JSON.parse(JSON.stringify(lastCellar.config));
-                // reposition
                 finalConfig.posX += 12; 
             } else if (passedConfig) {
                 finalConfig = passedConfig;
             }
-
             const name = `Cellar_${cellars.length + 1}`;
             new Cellar(cellars.length, name, finalConfig);
             saveToLocalStorage();
         },
         resetAll: () => {
-            localStorage.removeItem('wineCellarConfig');
-            location.reload();
+            if (confirm("Are you sure? This will delete all cellars and reset the app.")) {
+                localStorage.removeItem('wineCellarConfig');
+                location.reload();
+            }
         }
     };
-    gui.add(globalActions, 'addCellar').name('＋ Add New Cellar');
-    gui.add(globalActions, 'resetAll').name('⚠ Reset All');
 
-    // localstorage configs
+    gui.add(globalActions, 'addCellar').name('＋ Add New Cellar');
+
+    // restore state
     const saved = localStorage.getItem('wineCellarConfig');
     if (saved) {
         const configs = JSON.parse(saved);
@@ -283,11 +327,14 @@ function init() {
         globalActions.addCellar();
     }
 
+    gui.add(globalActions, 'resetAll').name('⚠ Reset All');
+
     raycaster = new THREE.Raycaster();
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('resize', onWindowResize);
 }
 
+// sync bottles
 function updateRaycastList() {
     allBottles = [];
     cellars.forEach(c => {
@@ -302,10 +349,29 @@ function onMouseMove(event) {
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 }
 
+// handle window
+function onWindowResize() {
+    const aspect = window.innerWidth / window.innerHeight;
+    camera.aspect = aspect;
+    
+    if (aspect < 1) { 
+        camera.position.z = 45; 
+        camera.fov = 80;
+    } else {
+        camera.position.z = 35; 
+        camera.fov = 75;
+    }
+
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// render loop
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
     
+    // logic start
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(allBottles);
     const infoDiv = document.getElementById('bottleInfo');
@@ -316,34 +382,29 @@ function animate() {
             if (INTERSECTED_BOTTLE) INTERSECTED_BOTTLE.material = INTERSECTED_BOTTLE.userData.originalMaterial;
             
             INTERSECTED_BOTTLE = target;
-            
             const highlightMat = INTERSECTED_BOTTLE.userData.originalMaterial.clone();
             highlightMat.color.setHex(INTERSECTED_BOTTLE.userData.highlightColor);
             INTERSECTED_BOTTLE.material = highlightMat;
 
+            // update ui
             if (infoDiv) {
-                infoDiv.style.display = 'block';
                 infoDiv.innerHTML = `
                     <strong>Cellar:</strong> ${target.userData.cellarId}<br>
                     <strong>Pos:</strong> R${target.userData.row} C${target.userData.col} D${target.userData.depth}<br>
                     <strong>Wine:</strong> ${target.userData.wineName}<br>
                     <strong>Vintage:</strong> ${target.userData.vintage}
                 `;
+                infoDiv.classList.add('active');
             }
         }
     } else if (INTERSECTED_BOTTLE) {
         INTERSECTED_BOTTLE.material = INTERSECTED_BOTTLE.userData.originalMaterial;
         INTERSECTED_BOTTLE = null;
-        if (infoDiv) infoDiv.style.display = 'none';
+        if (infoDiv) infoDiv.classList.remove('active');
     }
     renderer.render(scene, camera);
 }
 
-function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
+// run app
 init();
 animate();
